@@ -1,0 +1,99 @@
+"""
+Stock Analysis Report Page
+Comprehensive stock analysis with charts and metrics
+"""
+
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from data.api_client import APIClient
+from components.stock_input import stock_input_with_suggestions
+from components.metrics import display_company_header, display_key_metrics
+
+
+def render(api_client: APIClient, symbols_df: pd.DataFrame):
+    """Render Stock Analysis Report page."""
+    st.title("📊 Stock Analysis Report")
+
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        symbol = stock_input_with_suggestions(
+            "Enter Stock Symbol",
+            "analysis_symbol",
+            symbols_df,
+            st.session_state.get("analysis_symbol", "")
+        )
+
+        if st.button("🔍 Analyze Stock", use_container_width=True):
+            if symbol:
+                with st.spinner(f"Analyzing {symbol}..."):
+                    # Fetch company overview
+                    overview_data = api_client.get_company_overview(symbol)
+
+                    # Fetch daily prices
+                    daily_data = api_client.get_daily_prices(symbol)
+
+                    if overview_data and daily_data:
+                        st.session_state['analysis_data'] = {
+                            'overview': overview_data,
+                            'daily': daily_data,
+                            'symbol': symbol
+                        }
+                        st.success(f"✅ Analysis complete for {symbol}")
+
+    with col2:
+        if 'analysis_data' in st.session_state:
+            data = st.session_state['analysis_data']
+            overview = data['overview']
+            daily = data['daily']
+
+            # Display company info
+            display_company_header(overview)
+
+            # Display key metrics
+            display_key_metrics(overview)
+
+            # Price chart
+            if 'Time Series (Daily)' in daily:
+                df = pd.DataFrame(daily['Time Series (Daily)']).T
+                df.index = pd.to_datetime(df.index)
+                df = df.astype(float)
+                df = df.sort_index()
+                df = df.tail(50)  # Last 50 days
+
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=df.index,
+                    y=df['4. close'],
+                    mode='lines',
+                    name='Close Price',
+                    line=dict(color='blue', width=2)
+                ))
+
+                fig.update_layout(
+                    title=f"{data['symbol']} Stock Price (Last 50 Days)",
+                    xaxis_title="Date",
+                    yaxis_title="Price ($)",
+                    height=400
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Additional metrics
+                latest_price = df.iloc[-1]['4. close']
+                price_change = df.iloc[-1]['4. close'] - df.iloc[0]['4. close']
+                price_change_pct = (price_change / df.iloc[0]['4. close']) * 100
+
+                col3, col4, col5 = st.columns(3)
+                with col3:
+                    st.metric("Latest Price", f"${latest_price:.2f}")
+                with col4:
+                    st.metric("50-Day Change", f"${price_change:.2f}", f"{price_change_pct:.2f}%")
+                    with col5:
+                        high_52w = overview.get('52WeekHigh', 'N/A')
+                        low_52w = overview.get('52WeekLow', 'N/A')
+                        st.metric("52W High", high_52w)
+                        st.metric("52W Low", low_52w)
+            else:
+                st.info("Enter a stock symbol and click 'Analyze Stock' to begin.")
