@@ -8,7 +8,7 @@ from auth.authentication import check_authentication, show_login_page
 from components.sidebar import render_sidebar
 from pages import stock_analysis, portfolio_manager, market_news, earnings_viewer
 from data.symbol_loader import load_symbols_database
-from data.api_client import APIClient
+from utils.service_discovery import get_available_services,deregister_service
 
 # Page configuration
 st.set_page_config(
@@ -45,13 +45,6 @@ if 'logged_in' not in st.session_state:
 # Load symbols database (cached)
 SYMBOLS_DF = load_symbols_database()
 
-# Initialize API client
-try:
-    api_client = APIClient()
-except Exception as e:
-    st.error(f"Failed to initialize API client: {e}")
-    st.stop()
-
 # Authentication check
 if not check_authentication():
     show_login_page()
@@ -60,15 +53,31 @@ if not check_authentication():
 # Main application (user is logged in)
 st.sidebar.title(f"👤 Welcome, {st.session_state['username']}")
 
-# Render sidebar
-page = render_sidebar(SYMBOLS_DF)
+# Fetch available services from the service registry
+available_services = get_available_services()
+service_names = available_services.keys()  # Assuming the service names are keys in the returned dictionary
+
+# Render sidebar dynamically
+page = st.sidebar.selectbox("Choose a Service", list(service_names))
 
 # Route to appropriate page
-if page == "Stock Analysis Report":
-    stock_analysis.render(api_client, SYMBOLS_DF)
-elif page == "Portfolio Manager":
-    portfolio_manager.render(api_client, SYMBOLS_DF)
-elif page == "Market News and Sentiment":
-    market_news.render(api_client, SYMBOLS_DF)
-elif page == "Earnings Call Viewer":
-    earnings_viewer.render(api_client, SYMBOLS_DF)
+if page == "Stock Analysis Service":
+    stock_analysis.render( SYMBOLS_DF)
+elif page == "Portfolio Service":
+    portfolio_manager.render(SYMBOLS_DF)
+elif page == "Market News Service":
+    market_news.render( SYMBOLS_DF)
+elif page == "Earnings Service":
+    earnings_viewer.render(SYMBOLS_DF)
+
+# Remove service functionality (for demonstration)
+st.sidebar.subheader("Service Management")
+
+# Option to remove a service from the registry
+service_to_remove = st.sidebar.selectbox("Select Service to Remove from Service Registry", [""] + list(service_names))  # List of services
+if service_to_remove:
+    remove_button = st.sidebar.button(f"Remove {service_to_remove}")
+    if remove_button:
+        # Call the deregister function to remove the selected service from the registry
+        deregister_service(service_to_remove)
+        st.success(f"Service {service_to_remove} removed from the registry.")

@@ -7,13 +7,25 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
-from data.api_client import APIClient
+import json
+import os
+import requests  # NEW
 from models.portfolio import Portfolio
 from components.stock_input import stock_input_with_suggestions
 from utils.helpers import format_currency, format_percentage
+from utils.service_discovery import get_service_url
+
+# # Load the configuration from config.json
+# config_path = '/app/config.json'
+#
+# with open(config_path, 'r') as f:
+#     config = json.load(f)
+#
+
+SERVICE_NAME = "Portfolio_Service"
 
 
-def render(api_client: APIClient, symbols_df: pd.DataFrame):
+def render(symbols_df: pd.DataFrame):
     """Render Portfolio Manager page."""
     st.title("💼 Portfolio Manager")
 
@@ -30,7 +42,7 @@ def render(api_client: APIClient, symbols_df: pd.DataFrame):
         render_add_position(portfolio, symbols_df)
 
     with col2:
-        render_portfolio_display(api_client, portfolio)
+        render_portfolio_display( portfolio)
 
 
 def render_add_position(portfolio: Portfolio, symbols_df: pd.DataFrame):
@@ -87,8 +99,7 @@ def render_add_position(portfolio: Portfolio, symbols_df: pd.DataFrame):
             st.success("Portfolio cleared")
             st.rerun()
 
-
-def render_portfolio_display(api_client: APIClient, portfolio: Portfolio):
+def render_portfolio_display(portfolio: Portfolio):
     """Render the portfolio display with current values."""
     positions = st.session_state.get('portfolio', [])
 
@@ -99,56 +110,86 @@ def render_portfolio_display(api_client: APIClient, portfolio: Portfolio):
 
     st.subheader(f"Your Portfolio ({len(positions)} positions)")
 
-    # Fetch current prices
-    portfolio_data = []
-    total_value = 0
-    total_cost = 0
-
+    # Send positions to the portfolio microservice
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    for idx, stock in enumerate(positions):
-        status_text.text(f"Fetching data for {stock['symbol']}... ({idx + 1}/{len(positions)})")
-        progress_bar.progress((idx + 1) / len(positions))
+    status_text.text("Calculating portfolio metrics...")
+    progress_bar.progress(0.2)
 
-        quote_data = api_client.get_quote(stock['symbol'])
+    # Build payload for service
+    payload_positions = []
+    for p in positions:
+        payload_positions.append(
+            {
+                "symbol": p["symbol"],
+                "shares": float(p["shares"]),
+                "purchase_price": float(p["purchase_price"]),
+                "date_added": p.get("date_added"),
+            }
+        )
 
-        if quote_data and 'Global Quote' in quote_data:
-            try:
-                current_price = float(quote_data['Global Quote']['05. price'])
-                change_percent = float(quote_data['Global Quote']['10. change percent'].replace('%', ''))
+    try:
+        service_url = get_service_url(SERVICE_NAME)
+        res = requests.post(
+            f"{service_url}/portfolio/calculate",
+            json=payload_positions,
+        )
+        progress_bar.progress(0.7)
 
-                current_value = current_price * stock['shares']
-                cost_basis = stock['purchase_price'] * stock['shares']
-                gain_loss = current_value - cost_basis
-                gain_loss_percent = (gain_loss / cost_basis) * 100 if cost_basis > 0 else 0
+        if res.status_code == 200:
+            data = res.json()
+            enriched_positions = data["positions"]
+            summary = data["summary"]
+        else:
+            progress_bar.empty()
+            status_text.empty()
+            st.error(
+                f"Error from portfolio service: {res.status_code} - {res.text}"
+            )
+            return
+    except Exception as e:
+        progress_bar.empty()
+        status_text.empty()
+        st.error(f"Error contacting portfolio service: {e}")
+        return
 
-                portfolio_data.append({
-                    'Symbol': stock['symbol'],
-                    'Shares': stock['shares'],
-                    'Purchase Date': stock['date_added'],
-                    'Purchase Price': format_currency(stock['purchase_price']),
-                    'Current Price': format_currency(current_price),
-                    'Current Value': format_currency(current_value),
-                    'Cost Basis': format_currency(cost_basis),
-                    'Gain/Loss': format_currency(gain_loss),
-                    'Gain/Loss %': format_percentage(gain_loss_percent),
-                    'Day Change %': format_percentage(change_percent)
-                })
-
-                total_value += current_value
-                total_cost += cost_basis
-            except Exception as e:
-                st.warning(f"Error processing {stock['symbol']}: {e}")
-
+    progress_bar.progress(1.0)
+    status_text.text("✅ Portfolio updated")
     progress_bar.empty()
     status_text.empty()
+
+    # Build table data (with formatted values) for display
+    portfolio_data = []
+
+    for pos in enriched_positions:
+        current_value = pos["current_value"]
+        cost_basis = pos["cost_basis"]
+        gain_loss = pos["gain_loss"]
+        gain_loss_percent = pos["gain_loss_percent"]
+        day_change_percent = pos["day_change_percent"]
+
+        portfolio_data.append({
+            'Symbol': pos['symbol'],
+            'Shares': pos['shares'],
+            'Purchase Date': pos.get('date_added', '-'),
+            'Purchase Price': format_currency(pos['purchase_price']),
+            'Current Price': format_currency(pos['current_price']),
+            'Current Value': format_currency(current_value),
+            'Cost Basis': format_currency(cost_basis),
+            'Gain/Loss': format_currency(gain_loss),
+            'Gain/Loss %': format_percentage(gain_loss_percent),
+            'Day Change %': format_percentage(day_change_percent)
+        })
+
+    total_value = summary["total_value"]
+    total_cost = summary["total_cost"]
 
     if portfolio_data:
         df = pd.DataFrame(portfolio_data)
         st.dataframe(df, use_container_width=True)
 
-        # Remove stock functionality
+        # Remove stock functionality (unchanged)
         with st.expander("🗑️ Remove Stocks from Portfolio"):
             remove_symbol = st.selectbox(
                 "Select stock to remove:",

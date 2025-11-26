@@ -6,12 +6,18 @@ Comprehensive stock analysis with charts and metrics
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from data.api_client import APIClient
+import requests  # NEW: to call the microservice
+import json
+import os
 from components.stock_input import stock_input_with_suggestions
 from components.metrics import display_company_header, display_key_metrics
+from utils.service_discovery import get_service_url  # Importing the service discovery utility
 
 
-def render(api_client: APIClient, symbols_df: pd.DataFrame):
+
+SERVICE_NAME = "Stock_Analysis_Service"
+
+def render(symbols_df: pd.DataFrame):
     """Render Stock Analysis Report page."""
     st.title("📊 Stock Analysis Report")
 
@@ -28,19 +34,23 @@ def render(api_client: APIClient, symbols_df: pd.DataFrame):
         if st.button("🔍 Analyze Stock", use_container_width=True):
             if symbol:
                 with st.spinner(f"Analyzing {symbol}..."):
-                    # Fetch company overview
-                    overview_data = api_client.get_company_overview(symbol)
-
-                    # Fetch daily prices
-                    daily_data = api_client.get_daily_prices(symbol)
-
-                    if overview_data and daily_data:
-                        st.session_state['analysis_data'] = {
-                            'overview': overview_data,
-                            'daily': daily_data,
-                            'symbol': symbol
-                        }
-                        st.success(f"✅ Analysis complete for {symbol}")
+                    try:
+                        service_url = get_service_url(SERVICE_NAME)
+                        res = requests.get(f"{service_url}/analysis/{symbol}")
+                        if res.status_code == 200:
+                            data = res.json()
+                            st.session_state['analysis_data'] = {
+                                'overview': data['overview'],
+                                'daily': data['daily'],
+                                'symbol': data['symbol'],
+                            }
+                            st.success(f"✅ Analysis complete for {symbol}")
+                        else:
+                            st.error(f"Failed to analyze {symbol}: {res.text}")
+                    except Exception as e:
+                        st.error(f"Error contacting analysis service: {e}")
+            else:
+                st.warning("Please enter a stock symbol.")
 
     with col2:
         if 'analysis_data' in st.session_state:
@@ -90,10 +100,15 @@ def render(api_client: APIClient, symbols_df: pd.DataFrame):
                     st.metric("Latest Price", f"${latest_price:.2f}")
                 with col4:
                     st.metric("50-Day Change", f"${price_change:.2f}", f"{price_change_pct:.2f}%")
-                    with col5:
-                        high_52w = overview.get('52WeekHigh', 'N/A')
-                        low_52w = overview.get('52WeekLow', 'N/A')
-                        st.metric("52W High", high_52w)
-                        st.metric("52W Low", low_52w)
+                with col5:
+                    high_52w = overview.get('52WeekHigh', 'N/A')
+                    low_52w = overview.get('52WeekLow', 'N/A')
+                    st.metric("52W High", high_52w)
+                    st.metric("52W Low", low_52w)
             else:
-                st.info("Enter a stock symbol and click 'Analyze Stock' to begin.")
+                st.info("No daily price data available.")
+        else:
+            st.info("Enter a stock symbol and click 'Analyze Stock' to begin.")
+
+
+

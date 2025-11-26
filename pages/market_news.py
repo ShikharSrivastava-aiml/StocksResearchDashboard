@@ -5,25 +5,30 @@ Display market news with sentiment analysis
 
 import streamlit as st
 import pandas as pd
-from data.api_client import APIClient
+import json
+import os
+import requests  # NEW – to call the microservice
 from components.stock_input import stock_input_with_suggestions
 from utils.helpers import get_sentiment_color
+from utils.service_discovery import get_service_url
+
+SERVICE_NAME = "Market_News_Service"
 
 
-def render(api_client: APIClient, symbols_df: pd.DataFrame):
+def render(symbols_df: pd.DataFrame):
     """Render Market News and Sentiment page."""
     st.title("📰 Market News and Sentiment")
 
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        render_news_settings(api_client, symbols_df)
+        render_news_settings(symbols_df)
 
     with col2:
         render_news_feed()
 
 
-def render_news_settings(api_client: APIClient, symbols_df: pd.DataFrame):
+def render_news_settings(symbols_df: pd.DataFrame):
     """Render news settings panel."""
     st.subheader("News Settings")
 
@@ -50,27 +55,44 @@ def render_news_settings(api_client: APIClient, symbols_df: pd.DataFrame):
     limit = st.slider("Number of articles", 5, 50, 20)
 
     if st.button("📡 Fetch News", use_container_width=True):
-        with st.spinner("Fetching news..."):
+        with st.spinner("Fetching news."):
+
+            # Build query params for the microservice
             if search_type == "Topic":
-                news_data = api_client.get_news_sentiment(
-                    topics=topics,
-                    sort=sort_by,
-                    limit=limit
-                )
+                params = {
+                    "mode": "topic",
+                    "topic": topics,
+                    "sort": sort_by,
+                    "limit": limit,
+                }
             else:
-                if ticker_symbol:
-                    news_data = api_client.get_news_sentiment(
-                        tickers=ticker_symbol,
-                        sort=sort_by,
-                        limit=limit
-                    )
-                else:
+                if not ticker_symbol:
                     st.warning("Please enter a stock symbol")
                     return
 
-            if news_data:
-                st.session_state['news_data'] = news_data
-                st.success("✅ News loaded successfully")
+                params = {
+                    "mode": "ticker",
+                    "ticker": ticker_symbol,
+                    "sort": sort_by,
+                    "limit": limit,
+                }
+
+            try:
+                service_url = get_service_url(SERVICE_NAME)
+                res = requests.get(f"{service_url}/news", params=params)
+
+                if res.status_code == 200:
+                    payload = res.json()
+                    # 'news' field contains the raw Alpha Vantage-style response
+                    st.session_state['news_data'] = payload['news']
+                    st.success("✅ News loaded successfully")
+                elif res.status_code == 404:
+                    st.warning("No news articles found for this query.")
+                else:
+                    st.error(f"Error from news service: {res.status_code} - {res.text}")
+
+            except Exception as e:
+                st.error(f"Error contacting news service: {e}")
 
 
 def render_news_feed():

@@ -6,27 +6,31 @@ View and analyze earnings call transcripts
 import streamlit as st
 import pandas as pd
 import json
-from data.api_client import APIClient
+import os
+import requests
 from components.stock_input import stock_input_with_suggestions
 from components.metrics import display_sentiment_metrics, display_eps_metrics
 from utils.text_processing import clean_text, split_into_paragraphs, highlight_search_term, extract_longest_sentence
 from utils.helpers import infer_quarter, get_sentiment_color, get_sentiment_emoji
+from utils.service_discovery import get_service_url
 
 
-def render(api_client: APIClient, symbols_df: pd.DataFrame):
+SERVICE_NAME = "Earnings_Service"
+
+def render( symbols_df: pd.DataFrame):
     """Render Earnings Call Viewer page."""
     st.title("💼 Earnings Call Transcript Viewer")
 
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        render_earnings_selector(api_client, symbols_df)
+        render_earnings_selector( symbols_df)
 
     with col2:
         render_transcript_display()
 
 
-def render_earnings_selector(api_client: APIClient, symbols_df: pd.DataFrame):
+def render_earnings_selector(symbols_df: pd.DataFrame):
     """Render earnings selection panel."""
     st.subheader("📊 Stock Selection")
 
@@ -41,12 +45,22 @@ def render_earnings_selector(api_client: APIClient, symbols_df: pd.DataFrame):
     # Load available quarters
     if symbol and st.button("📅 Load Available Quarters", use_container_width=True):
         with st.spinner(f"Loading earnings data for {symbol}..."):
-            earnings_data = api_client.get_earnings(symbol)
-
-            if earnings_data and 'quarterlyEarnings' in earnings_data:
-                process_earnings_data(earnings_data, symbol)
-            else:
-                st.warning("No earnings data found for this symbol")
+            try:
+                service_url = get_service_url(SERVICE_NAME)
+                res = requests.get(f"{service_url}/earnings/{symbol}")
+                if res.status_code == 200:
+                    payload = res.json()
+                    earnings_data = payload["earnings"]
+                    if earnings_data and 'quarterlyEarnings' in earnings_data:
+                        process_earnings_data(earnings_data, symbol)
+                    else:
+                        st.warning("No earnings data found for this symbol")
+                elif res.status_code == 404:
+                    st.warning("No earnings data found for this symbol")
+                else:
+                    st.error(f"Error from earnings service: {res.status_code} - {res.text}")
+            except Exception as e:
+                st.error(f"Error contacting earnings service: {e}")
 
     # Quarter selection
     selected_quarter = render_quarter_selector()
@@ -54,7 +68,7 @@ def render_earnings_selector(api_client: APIClient, symbols_df: pd.DataFrame):
     # Fetch transcript
     if st.button("🔄 Fetch Transcript", use_container_width=True):
         if symbol and selected_quarter:
-            fetch_transcript(api_client, symbol, selected_quarter)
+            fetch_transcript( symbol, selected_quarter)
         else:
             st.warning("Please select a stock symbol and quarter first.")
 
@@ -143,23 +157,43 @@ def render_quarter_selector() -> str:
     return None
 
 
-def fetch_transcript(api_client: APIClient, symbol: str, quarter: str):
-    """Fetch earnings call transcript."""
+def fetch_transcript(symbol: str, quarter: str):
+    """Fetch earnings call transcript via microservice."""
     st.session_state["transcript_symbol"] = symbol
     st.session_state["transcript_quarter"] = quarter
 
     with st.spinner(f"Fetching transcript for {symbol} ({quarter})..."):
         try:
-            data = api_client.get_earnings_transcript(symbol, quarter)
+            # Call the earnings microservice instead of api_client directly
+            service_url = get_service_url(SERVICE_NAME)
+            res = requests.get(
+                f"{service_url}/earnings/{symbol}/transcript",
+                params={"quarter": quarter},
+            )
 
-            if data:
-                if "transcript" not in data or not data["transcript"]:
+            if res.status_code == 200:
+                payload = res.json()
+                # Our service returns: {"symbol": ..., "quarter": ..., "transcript": {...}}
+                data = payload["transcript"]
+
+                if not data or "transcript" not in data or not data["transcript"]:
                     st.error("⚠️ No transcript data found for this quarter.")
                 else:
                     st.session_state["transcript_data"] = data
-                    st.success(f"✅ Loaded transcript for {data.get('symbol')} – {data.get('quarter')}")
+                    st.success(
+                        f"✅ Loaded transcript for {data.get('symbol')} – {data.get('quarter')}"
+                    )
+
+            elif res.status_code == 404:
+                st.error("⚠️ No transcript found for this symbol/quarter.")
+
+            else:
+                st.error(
+                    f"🌐 Error from earnings service: {res.status_code} - {res.text}"
+                )
+
         except Exception as e:
-            st.error(f"🌐 Error fetching transcript: {e}")
+            st.error(f"🌐 Error contacting earnings service: {e}")
 
 
 def render_transcript_display():

@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  # Frontend service: Streamlit app
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"  # Map port 8501 on the host to 8501 in the container
+    networks:
+      - stockanalysis_network
+    depends_on:
+      - stock_analysis_service
+      - market_news_service
+      - portfolio_service
+      - earnings_service
+      - service_registry
+
+  service_registry:
+      build:
+        context: .
+        dockerfile: services/registry/Dockerfile
+      ports:
+        - "8010:8010"
+      networks:
+        - stockanalysis_network
+      depends_on:
+        - consul
+
+# Consul
+  consul:
+    image: consul:1.13.2
+    container_name: consul
+    ports:
+      - "8500:8500"  # Consul UI exposed on port 8500
+    networks:
+      - stockanalysis_network
+    command: "agent -dev -client=0.0.0.0"  # Run Consul in dev mode
+
+  # Stock analysis service
+  stock_analysis_service:
+    build:
+      context: .
+      dockerfile: services/stock_analysis/Dockerfile
+    ports:
+      - "8004:8000"  # Map port 8004 on the host to 8000 in the container
+    networks:
+      - stockanalysis_network
+    depends_on:
+      - service_registry
+
+  # Market news service
+  market_news_service:
+    build:
+      context: .
+      dockerfile: services/market_news/Dockerfile
+    ports:
+      - "8002:8000"  # Map port 8002 on the host to 8000 in the container
+    networks:
+      - stockanalysis_network
+    depends_on:
+      - service_registry
+
+  # Portfolio service
+  portfolio_service:
+    build:
+      context: .
+      dockerfile: services/portfolio/Dockerfile
+    ports:
+      - "8003:8000"  # Map port 8003 on the host to 8000 in the container
+    networks:
+      - stockanalysis_network
+    depends_on:
+      - service_registry
+
+  # Earnings service
+  earnings_service:
+    build:
+      context: .
+      dockerfile: services/earnings/Dockerfile
+    ports:
+      - "8001:8000"  # Map port 8001 on the host to 8000 in the container
+    networks:
+      - stockanalysis_network
+    depends_on:
+      - service_registry
+
+networks:
+  stockanalysis_network:
+    driver: bridge
