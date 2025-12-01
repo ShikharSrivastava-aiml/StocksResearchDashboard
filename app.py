@@ -74,10 +74,10 @@ elif page == "Earnings Service":
 st.sidebar.subheader("Service Management")
 
 # Option to remove a service from the registry
-service_to_remove = st.sidebar.selectbox("Select Service to Remove from Service Registry", [""] + list(service_names))  # List of services
-if service_to_remove:
-    remove_button = st.sidebar.button(f"Remove {service_to_remove}")
-    if remove_button:
-        # Call the deregister function to remove the selected service from the registry
-        deregister_service(service_to_remove)
-        st.success(f"Service {service_to_remove} removed from the registry.")
+# service_to_remove = st.sidebar.selectbox("Select Service to Remove from Service Registry", [""] + list(service_names))  # List of services
+# if service_to_remove:
+#     remove_button = st.sidebar.button(f"Remove {service_to_remove}")
+#     if remove_button:
+#         # Call the deregister function to remove the selected service from the registry
+#         deregister_service(service_to_remove)
+#         st.success(f"Service {service_to_remove} removed from the registry.")
