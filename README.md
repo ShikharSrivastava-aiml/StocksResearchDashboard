@@ -7,7 +7,8 @@ pip3 install -r requirements.txt
 python3 -m streamlit run app.py
 
 ## Running Tests
-Running tests creates pycache files.
+Running tests creates pycache files. There are 39 tests all in the tests/ directory.
+For more info about the tests visit our project documentation or look at the comments in test files.
 To run the test suite, use the following command:
 
 python -m pytest
