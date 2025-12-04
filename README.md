@@ -1,3 +1,7 @@
+# The application is currently hosted on google cloud vm http://34.138.213.172:8501/   
+# The service registry and it's health is currently hosted on http://34.138.213.172:8500/
+
+
 ## To run the application enter the following commands in terminal:
 
 git clone https://github.com/ShikharSrivastava-aiml/StockResearchDashboard.git
